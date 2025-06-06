@@ -1,23 +1,12 @@
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpStream;
 use std::io::prelude::*;
-use std::io::{Error};
 use std::io::{BufReader, Write};
 use std::time::Instant;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::HashMap;
-use jwhttp::ThreadPool;
+use jwhttp::Server;
 
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
-
-struct Server {
-    listener: TcpListener
-}
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        println!("Server shutting down gracefully...");
-    }
-}
 
 struct HttpRequest {
     method: String,
@@ -262,12 +251,12 @@ fn handle_client(mut stream: TcpStream) {
 
         let total_duration = request_start.elapsed();
 
-        // println!("----------------------------------------------");
+        println!("----------------------------------------------");
         println!("{host} {method} {path} - 200 {:?}", total_duration);
-        // println!("{version} {connection}");
-        // println!("headers: {:?}", headers.keys());
-        // println!("params: {:?}", params);
-        // println!("accepts: {:?}", accept);
+        println!("{version} {connection}");
+        println!("headers: {:?}", headers.keys());
+        println!("params: {:?}", params);
+        println!("accepts: {:?}", accept);
         
         // Exit the loop if we shouldn't keep the connection alive
         if !should_keep_alive {
@@ -278,7 +267,7 @@ fn handle_client(mut stream: TcpStream) {
     }
 }
 
-fn main() -> Result<(), Error> {
+fn main() {
     #[cfg(windows)]
     {
         unsafe extern "system" {
@@ -295,43 +284,11 @@ fn main() -> Result<(), Error> {
         }
     }
 
-    let server = Server {
-        listener: TcpListener::bind("127.0.0.1:80")?
+    let server = match Server::new("127.0.0.1:80") {
+        Ok(server) => server,
+        Err(e) => panic!("Failed to start server: {e}")
     };
 
-    let pool = ThreadPool::new(4);
+    server.listen(handle_client).expect("Failed to listen on server");
 
-    println!("Server started on http://127.0.0.1:80/");
-
-    // set listener to non-blocking so we can check shutdown flag
-    server.listener.set_nonblocking(true)?;
-    
-    loop {
-        if SHUTDOWN.load(Ordering::Relaxed) {
-            println!("Received shutdown signal, stopping server...");
-            break;
-        }
-        
-        match server.listener.accept() {
-            Ok((stream, _addr)) => {
-                pool.execute(move || {
-                    match stream.set_nonblocking(false) {
-                        Ok(_) => (),
-                        Err(e) => {
-                            eprintln!("Failed to set stream blocking: {}", e);
-                            panic!("Quitting due to skill issues surrounding the handling of nonblocking threads.");
-                        }
-                    }
-                    handle_client(stream);
-                });
-            }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-                continue;
-            }
-            Err(e) => return Err(e),
-        }
-    }
-
-    Ok(())
 }
